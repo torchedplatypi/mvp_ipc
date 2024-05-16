@@ -26,7 +26,6 @@ int main(int argc, char** argv) {
       perror("minWriter: failed mkfifo(/tmp/gps_pipe)");
    }
 
-   //th
    int pipe_fd = open(GPS_PIPE_PATH, O_WRONLY | O_NONBLOCK);
    if( pipe_fd == -1 ){
       perror("minWriter: failed open pipe for write");

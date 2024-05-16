@@ -9,29 +9,58 @@
 #include "processChores.h"
 #include "customTypes.h"
 
-#define PID_FILE_NAME "datacollector.pid"
 #define GPS_PIPE_PATH "/tmp/gps_pipe"
 
-volatile sig_atomic_t terminateFlag = 0;
+#define PID_FILE_NAME "datacollector.pid"
+int pid_file;
 
-void handleSignal(int signal) {
-   if (signal == SIGUSR1) {
-      terminateFlag = 1;
+volatile sig_atomic_t terminateFlag = 0;
+void signalHandler(int signum) {
+   switch (signum){
+      case SIGINT:
+      case SIGPIPE:
+         printf("\nReceived SIGINT or SIGPIPE. Releasing PID lock file.\n");
+         unlink(GPS_PIPE_PATH);
+         release_pid_lock(pid_file, PID_FILE_NAME);
+         exit(-1);
+         break;
+      case SIGUSR1:
+         terminateFlag = 1;
+         break;
+      default:
+         break;
    }
 }
 
 int main() {
-   int pid_file = acquire_pid_lock(PID_FILE_NAME);
+
+   // Set up the signal handler for SIGINT
+   struct sigaction sa;
+   sa.sa_handler = signalHandler;
+   sigemptyset(&sa.sa_mask);
+   sa.sa_flags = 0;
+
+   if (sigaction(SIGINT, &sa, NULL) == -1) {
+      perror("Error setting up SIGINT handler");
+      exit(-1);
+   }
+   if (sigaction(SIGPIPE, &sa, NULL) == -1) {
+      perror("Error setting up SIGPIPE handler");
+      exit(-1);
+   }
+   if (sigaction(SIGUSR1, &sa, NULL) == -1) {
+      perror("Error setting up SIGUSR1 handler");
+      exit(-1);
+   }
+
+   pid_file = acquire_pid_lock(PID_FILE_NAME);
    if( pid_file == -1 ){
       handle_pid_lock_failure();
    }
 
-
-   signal(SIGUSR1, handleSignal);
-
    // Create or open the named pipe for writing
    mkfifo(GPS_PIPE_PATH, 0666);
-   int pipe_fd = open(GPS_PIPE_PATH, O_WRONLY | O_NONBLOCK);
+   int pipe_fd = open(GPS_PIPE_PATH, O_WRONLY);
 
    // Signal powerManager that collector is ready
    //kill(/*powerManager pid*/, SIGUSR2);
@@ -46,7 +75,11 @@ int main() {
    printf("attempt write to pipe");
    fflush(stdout);
    while(1){
-      write(pipe_fd, &gpsData, sizeof(gpsData));
+      int wc = write(pipe_fd, &gpsData, sizeof(gpsData));
+      if( wc == -1 ){
+         perror("pipe write error");
+      }
+      sleep(2);
    }
 
    // Simulate ongoing work
